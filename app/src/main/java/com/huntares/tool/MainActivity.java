@@ -5,6 +5,7 @@ import android.os.*;
 import android.content.*;
 import android.net.Uri;
 import android.graphics.Color;
+import android.content.SharedPreferences;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.view.*;
@@ -29,12 +30,18 @@ public class MainActivity extends Activity {
         showHome();
     }
     int white = Color.WHITE;
+    int accent() {
+        int[] palette = {0xffffffff, 0xffa855f7, 0xff34b9ff, 0xff00c9a7, 0xffff5577, 0xffffb84c};
+        int index = getPreferences(0).getInt("accent", 0);
+        return palette[Math.max(0, Math.min(index, palette.length - 1))];
+    }
+
     int muted = 0xffadb0b8;
     GradientDrawable panel(boolean glow) {
         GradientDrawable d = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
             new int[]{0xff1b1d21, 0xff050506, 0xff111216});
         d.setCornerRadius(22);
-        d.setStroke(glow ? 2 : 1, glow ? 0xffe3e3e3 : 0xff55565a);
+        d.setStroke(glow ? 2 : 1, glow ? accent() : 0xff55565a);
         return d;
     }
     TextView label(String value, int size, int color) {
@@ -53,18 +60,24 @@ public class MainActivity extends Activity {
         if (!title.equals("HUNTARES TOOL")) {
             header.addView(back); back.setOnClickListener(v -> showHome());
         }
-        TextView h = label(title, 25, white); h.setTypeface(null,Typeface.BOLD);
+        TextView h = label(title, 23, white); h.setTypeface(null,Typeface.BOLD);
         header.addView(h, new LinearLayout.LayoutParams(0,70,1));
         TextView help = label("ⓘ", 30, white); help.setGravity(Gravity.CENTER);
         help.setBackground(panel(true));
         header.addView(help, new LinearLayout.LayoutParams(62,62));
         help.setOnClickListener(v -> showHelp(title));
         body.addView(header);
-        TextView logo = label("♛\nHUNTARES", 34, white);
-        logo.setGravity(Gravity.CENTER); logo.setTypeface(null,Typeface.BOLD);
-        logo.setPadding(0,38,0,28); body.addView(logo);
-        status = label("", 13, muted); status.setPadding(8,8,8,20); body.addView(status);
-        footer();
+        if (title.equals("HUNTARES TOOL")) {
+            android.widget.ImageView avatar = new android.widget.ImageView(this);
+            avatar.setImageResource(com.huntares.tool.R.mipmap.ic_launcher);
+            avatar.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);
+            LinearLayout.LayoutParams imgLp = new LinearLayout.LayoutParams(-1, 225);
+            imgLp.setMargins(0, 18, 0, 6); body.addView(avatar, imgLp);
+            TextView intro = label("HUNTARES TOOL  •  PAK / LUA", 19, accent());
+            intro.setGravity(Gravity.CENTER); intro.setTypeface(null, Typeface.BOLD);
+            body.addView(intro);
+        }
+        status = label("", 14, muted); status.setPadding(8,18,8,20); body.addView(status);
     }
     void footer() {
         TextView foot = label("♛  H U N T A R E S", 17, white);
@@ -78,9 +91,9 @@ public class MainActivity extends Activity {
     void button(String name, Runnable action) {
         TextView b = label(name + "    ›", 19, white);
         b.setTypeface(null, Typeface.BOLD); b.setPadding(24,24,20,24);
-        b.setBackground(panel(true));
+        b.setBackground(panel(false));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1,-2);
-        lp.setMargins(0,8,0,12); body.addView(b,lp);
+        lp.setMargins(0,7,0,9); body.addView(b,lp);
         b.setOnClickListener(v -> action.run());
     }
     void showHelp(String context) {
@@ -125,13 +138,48 @@ public class MainActivity extends Activity {
             i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
             startActivityForResult(i, PICK_TREE);
         });
-        button("LUA TOOL", () -> showLua()); button("PAK TOOL", () -> showPak());
+        section("ИНСТРУМЕНТЫ");
+        button("◈   PAK Unpack", () -> showPak());
+        button("◈   PAK Repack", () -> showPak());
+        button("{ }   LUA Decompile", () -> showLua());
+        button("{ }   LUA Compile", () -> showLua());
+        section("ПРИЛОЖЕНИЕ");
+        button("⚙   Настройки оформления", () -> showSettings());
+        button("♛   Лицензии и администрирование", () -> showLicenses());
         button("Открыть рабочую папку", () -> { if (root != null) {
             Intent i = new Intent(Intent.ACTION_VIEW); i.setDataAndType(root.getUri(), "vnd.android.document/directory");
             i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             try { startActivity(i); } catch(Exception e) { msg("Откройте выбранную папку в файловом менеджере"); }
         }});
+        footer();
         TextView t = new TextView(this); t.setText("Алгоритм Lua: @VoidPAK. Только поддерживаемые форматы Lua 5.3 и PAK. Результаты требуют проверки."); t.setTextColor(0xffaaaaaa); body.addView(t);
+    }
+    void section(String text) {
+        TextView v = label(text, 12, muted);
+        v.setTypeface(null, Typeface.BOLD);
+        v.setPadding(10, 22, 0, 6);
+        body.addView(v);
+    }
+    void showSettings() {
+        init("Настройки");
+        section("ЦВЕТ ОФОРМЛЕНИЯ");
+        String[] colors = {"Чёрно-белый (по умолчанию)", "Фиолетовый", "Голубой", "Бирюзовый", "Красный", "Золотой"};
+        for (int i=0; i<colors.length; i++) {
+            final int index=i;
+            button((getPreferences(0).getInt("accent",0)==i ? "✓  " : "○  ")+colors[i], () -> {
+                getPreferences(0).edit().putInt("accent",index).apply(); showSettings();
+            });
+        }
+        section("О ПРОГРАММЕ");
+        TextView note=label("HUNTARES TOOL • Android\nPAK/LUA-модули: поддержка зависит от формата. Алгоритм Lua: @VoidPAK.",14,muted);
+        note.setPadding(8,10,8,20); body.addView(note); footer();
+    }
+    void showLicenses() {
+        init("Лицензии");
+        section("УПРАВЛЕНИЕ ДОСТУПОМ");
+        TextView note=label("Универсальные ключи: любое количество устройств, до ручного отключения.\n\nHWID-ключи: одно устройство, срок задаётся администратором.\n\nДля безопасной выдачи ключей, учёта устройств и удалённой блокировки требуется сервер. В этой сборке сервер лицензирования ещё не подключён. Создание и активация ключей недоступны.",16,white);
+        note.setPadding(18,20,18,20); note.setBackground(panel(false)); body.addView(note);
+        button("← Вернуться", () -> showHome()); footer();
     }
     @Override protected void onActivityResult(int req, int result, Intent data) {
         super.onActivityResult(req, result, data);
