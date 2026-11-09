@@ -15,26 +15,81 @@ import com.chaquo.python.Python;
 import com.chaquo.python.android.AndroidPlatform;
 import java.io.*;
 import java.util.*;
+import org.json.*;
+import java.net.*;
+import java.security.SecureRandom;
 
 public class MainActivity extends Activity {
     DocumentFile root;
     LinearLayout body;
     TextView status;
     String mode = "full";
+    boolean admin = false;
+    String sessionKey = "";
+    String api = "";
+    interface ApiResult { void done(JSONObject result, String error); }
+    void request(String route, JSONObject payload, ApiResult callback) {
+        new Thread(() -> {
+            try {
+                URL url = new URL(api + route);
+                HttpURLConnection c = (HttpURLConnection)url.openConnection();
+                c.setConnectTimeout(10000); c.setReadTimeout(10000);
+                c.setRequestMethod("POST"); c.setDoOutput(true);
+                c.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+                byte[] bytes=payload.toString().getBytes("UTF-8");
+                try(OutputStream o=c.getOutputStream()){o.write(bytes);}
+                InputStream in=(c.getResponseCode()<400)?c.getInputStream():c.getErrorStream();
+                ByteArrayOutputStream out=new ByteArrayOutputStream(); byte[] b=new byte[4096]; int n;
+                while((n=in.read(b))!=-1)out.write(b,0,n);
+                JSONObject r=new JSONObject(out.toString("UTF-8")); c.disconnect();
+                runOnUiThread(()->callback.done(r,null));
+            } catch(Exception e) {runOnUiThread(()->callback.done(null,e.getMessage()));}
+        }).start();
+    }
+    JSONObject obj(String... fields) { JSONObject j=new JSONObject(); try {for(int i=0;i<fields.length;i+=2)j.put(fields[i],fields[i+1]);}catch(Exception e){}return j; }
+    String deviceId() {
+        SharedPreferences pref=getPreferences(0);
+        String id=pref.getString("device_id",null);
+        if(id==null){byte[] b=new byte[16];new SecureRandom().nextBytes(b);StringBuilder x=new StringBuilder();for(byte v:b)x.append(String.format(java.util.Locale.US,"%02x",v&255));id=x.toString();pref.edit().putString("device_id",id).apply();}
+        return id;
+    }
+    void activate(String key) {
+        if(api.isEmpty()){msg("Сначала укажите HTTPS-адрес сервера в настройках подключения");return;}
+        msg("Проверяем ключ...");
+        request("/activate",obj("key",key,"device_id",deviceId(),"model",android.os.Build.MANUFACTURER+" "+android.os.Build.MODEL),(r,e)->{
+            if(e!=null){msg("Нет связи с сервером: "+e);return;}
+            if(!r.optBoolean("ok")){msg(r.optString("error","Ключ не принят"));return;}
+            sessionKey=key;admin=r.optBoolean("admin");showHome();
+        });
+    }
+    void showActivation(){
+        init("Активация доступа");
+        TextView t=label("Введите лицензионный ключ, чтобы открыть HUNTARES TOOL",16,white);t.setPadding(dp(6),dp(22),0,dp(14));body.addView(t);
+        EditText key=new EditText(this);key.setSingleLine(true);key.setHint("Ключ доступа");key.setTextColor(white);key.setHintTextColor(muted);key.setBackground(panel(false));key.setPadding(dp(15),dp(12),dp(15),dp(12));body.addView(key);
+        button("Активировать",()->activate(key.getText().toString().trim()));
+        TextView contact=label("Получить ключ и купить обучение по созданию CFG: @haunter_extaze",14,white);
+        contact.setPadding(dp(8),dp(22),dp(8),dp(22));body.addView(contact);
+        contact.setOnClickListener(v->startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse("https://t.me/haunter_extaze"))));
+        button("Настроить адрес сервера",()->showConnection());
+        footer();
+    }
+    void showConnection(){
+        init("Подключение");status.setText("Требуется ваш сервер лицензирования с HTTPS");
+        EditText field=new EditText(this);field.setSingleLine(true);field.setText(api);field.setHint("https://license.example.com");field.setTextColor(white);field.setHintTextColor(muted);body.addView(field);
+        button("Сохранить адрес",()->{String value=field.getText().toString().trim().replaceAll("/+$","");if(!value.startsWith("https://")){msg("Нужен HTTPS-адрес");return;}api=value;getPreferences(0).edit().putString("api",api).apply();showActivation();});
+    }
+
     static final int PICK_TREE = 10;
     @Override public void onCreate(Bundle b) {
         super.onCreate(b);
         if (!Python.isStarted()) Python.start(new AndroidPlatform(this));
         String uri = getPreferences(0).getString("tree", null);
         if (uri != null) root = DocumentFile.fromTreeUri(this, Uri.parse(uri));
-        showHome();
+        api=getPreferences(0).getString("api", "");
+        showActivation();
     }
     int white = Color.WHITE;
-    int accent() {
-        int[] palette = {0xffffffff, 0xffa855f7, 0xff34b9ff, 0xff00c9a7, 0xffff5577, 0xffffb84c};
-        int index = getPreferences(0).getInt("accent", 0);
-        return palette[Math.max(0, Math.min(index, palette.length - 1))];
-    }
+    int accent() { return Color.WHITE; }
 
     int muted = 0xffadb0b8;
     GradientDrawable panel(boolean glow) {
@@ -135,6 +190,7 @@ public class MainActivity extends Activity {
         path("LUA TOOL", "ОРИГИНАЛ ЛУА"); path("LUA TOOL", "lua_unpak"); path("LUA TOOL", "result_lua");
     }
     void showHome() {
+        if(sessionKey.isEmpty()){showActivation();return;}
         init("HUNTARES TOOL");
         if(root==null) {
             msg("Для работы выберите папку, например Documents");
@@ -143,13 +199,20 @@ public class MainActivity extends Activity {
             status.setText("●  Рабочая папка подключена");status.setTextColor(0xff65dca1);
         }
         section("ИНСТРУМЕНТЫ");
-        button("PAK Unpack",()->showPak());
-        button("PAK Repack",()->showPak());
-        button("LUA Decompile",()->showLua());
-        button("LUA Compile",()->showLua());
+        LinearLayout grid=new LinearLayout(this);grid.setOrientation(1);grid.setPadding(dp(8),dp(8),dp(8),dp(8));grid.setBackground(panel(true));body.addView(grid);
+        String[][] names={{"PAK UNPACK","PAK REPACK"},{"LUA UNPACK","LUA REPACK"}};
+        for(int row=0;row<2;row++){
+            LinearLayout line=new LinearLayout(this);grid.addView(line);
+            for(int col=0;col<2;col++){
+                final int r=row,c=col;
+                TextView tile=label(names[row][col],14,white);tile.setGravity(Gravity.CENTER);tile.setTypeface(null,Typeface.BOLD);tile.setBackground(bg(0xff17181b,0xff5b5b61,14));
+                LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,dp(105),1);lp.setMargins(dp(4),dp(4),dp(4),dp(4));line.addView(tile,lp);
+                tile.setOnClickListener(v->{if(r==0)showPak();else showLua();});
+            }
+        }
         section("ПРИЛОЖЕНИЕ");
-        button("Настройки оформления",()->showSettings());
-        button("Лицензии и администрирование",()->showLicenses());
+        button("Настройки",()->showSettings());
+        if(admin)button("♛  Админ-панель",()->showAdmin());
         button("Открыть рабочую папку",()->{if(root==null)pickFolder();else {
             Intent i=new Intent(Intent.ACTION_VIEW);i.setDataAndType(root.getUri(),"vnd.android.document/directory");
             i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
@@ -167,35 +230,14 @@ public class MainActivity extends Activity {
         v.setPadding(dp(7),dp(19),0,dp(7));body.addView(v);
     }
     void showSettings() {
-        init("Настройки");status.setText("Изменения применяются сразу");
-        section("ВНЕШНИЙ ВИД");
-        TextView title=label("Тема оформления",17,Color.WHITE);title.setPadding(dp(8),dp(12),0,dp(8));body.addView(title);
-        button("Тёмная — по умолчанию",()->msg("Тёмная тема активна"));
-        section("ЦВЕТ ОФОРМЛЕНИЯ");
-        final int[] palette={0xffffffff,0xffa855f7,0xff34b9ff,0xff00c9a7,0xffff5577,0xffffb84c,0xff38d466,0xffffd74c,0xffff62b7,0xffbd32fa};
-        final String[] names={"Белый","Фиолетовый","Голубой","Бирюзовый","Красный","Оранжевый","Зелёный","Жёлтый","Розовый","Пурпурный"};
-        LinearLayout colors=new LinearLayout(this);colors.setOrientation(1);colors.setPadding(dp(10),dp(10),dp(10),dp(10));colors.setBackground(panel(false));
-        int selected=getPreferences(0).getInt("accent",0);
-        for(int row=0;row<2;row++){
-            LinearLayout line=new LinearLayout(this);line.setGravity(Gravity.CENTER);
-            for(int col=0;col<5;col++){
-                final int idx=row*5+col;
-                TextView swatch=label(selected==idx?"✓":"",20,idx==0?Color.BLACK:Color.WHITE);
-                swatch.setGravity(Gravity.CENTER);swatch.setBackground(bg(palette[idx],selected==idx?0xff999999:0xff242428,40));
-                LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,dp(44),1);lp.setMargins(dp(5),dp(5),dp(5),dp(5));line.addView(swatch,lp);
-                swatch.setContentDescription(names[idx]);
-                swatch.setOnClickListener(v->{getPreferences(0).edit().putInt("accent",idx).apply();showSettings();});
-            }
-            colors.addView(line);
-        }
-        body.addView(colors);
-        TextView current=label("Выбран: "+names[selected],14,muted);current.setPadding(dp(10),dp(12),0,dp(6));body.addView(current);
+        init("Настройки");status.setText("Оформление: чёрно-белое, фиксированное");
         section("ОБЩИЕ");
         settingToggle("Показывать полное время","full_time",true);
         settingToggle("Сохранять последнюю директорию","last_dir",true);
         settingToggle("Звук действий","sounds",false);
+        button("Выход из аккаунта",()->{sessionKey="";admin=false;showActivation();});
         button("О приложении",()->new AlertDialog.Builder(this).setTitle("HUNTARES TOOL")
-            .setMessage("PAK / LUA инструмент. Поддержка файлов зависит от формата. Авторские сведения сторонних компонентов сохранены в исходном коде.")
+            .setMessage("PAK / LUA инструмент. Поддержка файлов зависит от формата.")
             .setPositiveButton("Закрыть",null).show());
         footer();
     }
@@ -205,33 +247,63 @@ public class MainActivity extends Activity {
         sw.setBackground(panel(false));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.setMargins(0,dp(4),0,dp(5));body.addView(sw,lp);
         sw.setOnCheckedChangeListener((v,checked)->getPreferences(0).edit().putBoolean(key,checked).apply());
     }
-    void showLicenses() {
-        init("Лицензии и доступ");status.setText("Сервер лицензирования пока не подключён");
-        section("АКТИВАЦИЯ");
-        EditText key=new EditText(this);key.setSingleLine(true);key.setHint("Введите ключ доступа");key.setTextColor(Color.WHITE);key.setHintTextColor(muted);
-        key.setPadding(dp(16),dp(14),dp(16),dp(14));key.setBackground(panel(false));body.addView(key);
-        button("Активировать",()->msg("Активация недоступна: сервер ключей не настроен"));
-        section("АДМИНИСТРИРОВАНИЕ");
-        button("♛  Админ панель",()->showAdmin());footer();
-    }
     void showAdmin() {
-        init("Админ панель");status.setText("Демонстрация интерфейса — подключение сервера требуется");
-        section("УПРАВЛЕНИЕ");
-        button("Создать ключ",()->showCreateKey());
-        button("Управление ключами",()->msg("Сервер лицензирования не подключён"));
-        button("Устройства и активации",()->msg("Сервер лицензирования не подключён"));
-        button("Статистика",()->msg("Сервер лицензирования не подключён"));footer();
+        if(!admin){showHome();return;}
+        init("Админ-панель");status.setText("Управление ключами на сервере");
+        button("Создать HWID-ключ",()->showCreateKey("hwid"));
+        button("Создать универсальный ключ",()->showCreateKey("universal"));
+        button("Информация о ключах",()->showKeys());footer();
     }
-    void showCreateKey() {
-        init("Создать ключ");status.setText("Макет формы. Выдача ключей недоступна без сервера.");
-        final RadioGroup group=new RadioGroup(this);
-        RadioButton universal=new RadioButton(this);universal.setText("Универсальный — любые устройства");universal.setTextColor(Color.WHITE);universal.setChecked(true);group.addView(universal);
-        RadioButton hwid=new RadioButton(this);hwid.setText("HWID — одно устройство");hwid.setTextColor(Color.WHITE);group.addView(hwid);body.addView(group);
-        section("НАЗВАНИЕ КЛЮЧА");EditText name=new EditText(this);name.setHint("HUNTARES-VIP");name.setTextColor(Color.WHITE);name.setHintTextColor(muted);body.addView(name);
-        section("СРОК ДЕЙСТВИЯ");Switch unlimited=new Switch(this);unlimited.setText("Бессрочно (до отключения)");unlimited.setTextColor(Color.WHITE);unlimited.setChecked(true);body.addView(unlimited);
-        NumberPicker days=new NumberPicker(this);days.setMinValue(1);days.setMaxValue(3650);days.setValue(7);days.setVisibility(View.GONE);body.addView(days);
-        unlimited.setOnCheckedChangeListener((v,checked)->days.setVisibility(checked?View.GONE:View.VISIBLE));
-        button("Создать ключ",()->msg("Для создания ключей необходимо подключить сервер и авторизацию администратора"));footer();
+    void showCreateKey(String type) {
+        if(!admin){showActivation();return;}
+        init(type.equals("hwid")?"Создать HWID-ключ":"Создать универсальный ключ");
+        section("НАЗВАНИЕ КЛЮЧА");
+        EditText name=new EditText(this);name.setSingleLine(true);name.setHint("HUNTARES-VIP");name.setTextColor(white);name.setHintTextColor(muted);body.addView(name);
+        Switch unlimited=new Switch(this);unlimited.setText("Бессрочно (до отключения)");unlimited.setTextColor(white);unlimited.setChecked(true);body.addView(unlimited);
+        section("СРОК В ДНЯХ");
+        EditText days=new EditText(this);days.setInputType(2);days.setText("7");days.setTextColor(white);days.setVisibility(View.GONE);body.addView(days);
+        unlimited.setOnCheckedChangeListener((v,on)->days.setVisibility(on?View.GONE:View.VISIBLE));
+        button("Создать ключ",()->{
+            String title=name.getText().toString().trim();
+            if(title.isEmpty()){msg("Введите название ключа");return;}
+            String d=unlimited.isChecked()?"0":days.getText().toString().trim();
+            request("/admin/create",obj("admin_key",sessionKey,"name",title,"type",type,"days",d),(r,e)->{
+                msg(e!=null?e:r.optBoolean("ok")?"Ключ создан: "+r.optString("key"):r.optString("error"));
+            });
+        });footer();
+    }
+    void showKeys(){
+        if(!admin){showActivation();return;}
+        init("Информация о ключах");msg("Загрузка...");
+        request("/admin/list",obj("admin_key",sessionKey),(r,e)->{
+            if(e!=null){msg(e);return;}
+            if(!r.optBoolean("ok")){msg(r.optString("error"));return;}
+            msg("Нажмите на ключ для просмотра устройств");
+            JSONArray items=r.optJSONArray("keys");if(items==null)return;
+            for(int i=0;i<items.length();i++){
+                JSONObject item=items.optJSONObject(i);if(item==null)continue;
+                String k=item.optString("key");
+                button(k+"  •  "+item.optString("type")+(item.optBoolean("active")?"  ✓":"  ✕"),()->showKeyDetails(k));
+            }
+        });
+    }
+    void showKeyDetails(String key){
+        init("Данные ключа");msg(key);
+        request("/admin/details",obj("admin_key",sessionKey,"key",key),(r,e)->{
+            if(e!=null){msg(e);return;}
+            if(!r.optBoolean("ok")){msg(r.optString("error"));return;}
+            JSONArray devices=r.optJSONArray("devices");
+            section("УСТРОЙСТВА И АКТИВАЦИИ");
+            if(devices==null||devices.length()==0)button("Активаций пока нет",()->{});
+            else for(int i=0;i<devices.length();i++){
+                JSONObject device=devices.optJSONObject(i);if(device==null)continue;
+                TextView row=label(device.optString("model")+"\nID установки: "+device.optString("device_id")+"\nПоследний вход: "+device.optString("last_seen"),13,white);
+                row.setPadding(dp(12),dp(12),dp(12),dp(12));row.setBackground(panel(false));body.addView(row);
+            }
+            button("Отключить ключ",()->new AlertDialog.Builder(this).setTitle("Отключить ключ?")
+                .setPositiveButton("Отключить",(d,w)->request("/admin/revoke",obj("admin_key",sessionKey,"key",key),(res,err)->{if(err!=null)msg(err);else showKeys();}))
+                .setNegativeButton("Отмена",null).show());
+        });
     }
     @Override protected void onActivityResult(int req, int result, Intent data) {
         super.onActivityResult(req, result, data);
