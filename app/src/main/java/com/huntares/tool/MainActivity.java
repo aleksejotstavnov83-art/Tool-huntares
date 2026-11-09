@@ -62,9 +62,14 @@ public class MainActivity extends Activity {
         }
         TextView h = label(title, 23, white); h.setTypeface(null,Typeface.BOLD);
         header.addView(h, new LinearLayout.LayoutParams(0,70,1));
-        TextView help = label("ⓘ", 30, white); help.setGravity(Gravity.CENTER);
-        help.setBackground(panel(true));
-        header.addView(help, new LinearLayout.LayoutParams(62,62));
+        TextView help = label("?", 22, accent()); help.setGravity(Gravity.CENTER);
+        help.setTypeface(null, Typeface.BOLD);
+        GradientDrawable helpCircle = new GradientDrawable();
+        helpCircle.setColor(0xff15161a); helpCircle.setShape(GradientDrawable.OVAL);
+        helpCircle.setStroke(2, accent());
+        help.setBackground(helpCircle);
+        LinearLayout.LayoutParams helpLp = new LinearLayout.LayoutParams(48,48);
+        helpLp.setMargins(8,0,4,0); header.addView(help, helpLp);
         help.setOnClickListener(v -> showHelp(title));
         body.addView(header);
         if (title.equals("HUNTARES TOOL")) {
@@ -89,9 +94,9 @@ public class MainActivity extends Activity {
         body.addView(foot);
     }
     void button(String name, Runnable action) {
-        TextView b = label(name + "    ›", 19, white);
+        TextView b = label(name + "    ›", 18, accent());
         b.setTypeface(null, Typeface.BOLD); b.setPadding(24,24,20,24);
-        b.setBackground(panel(false));
+        b.setBackground(panel(true));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1,-2);
         lp.setMargins(0,7,0,9); body.addView(b,lp);
         b.setOnClickListener(v -> action.run());
@@ -152,7 +157,7 @@ public class MainActivity extends Activity {
             try { startActivity(i); } catch(Exception e) { msg("Откройте выбранную папку в файловом менеджере"); }
         }});
         footer();
-        TextView t = new TextView(this); t.setText("Алгоритм Lua: @VoidPAK. Только поддерживаемые форматы Lua 5.3 и PAK. Результаты требуют проверки."); t.setTextColor(0xffaaaaaa); body.addView(t);
+        TextView t = new TextView(this); t.setText("Поддержка PAK и Lua зависит от формата файлов."); t.setTextColor(0xffaaaaaa); body.addView(t);
     }
     void section(String text) {
         TextView v = label(text, 12, muted);
@@ -162,6 +167,8 @@ public class MainActivity extends Activity {
     }
     void showSettings() {
         init("Настройки");
+        section("ПРЕДПРОСМОТР");
+        button("Пример активной кнопки", () -> msg("Тема применяется ко всем экранам"));
         section("ЦВЕТ ОФОРМЛЕНИЯ");
         String[] colors = {"Чёрно-белый (по умолчанию)", "Фиолетовый", "Голубой", "Бирюзовый", "Красный", "Золотой"};
         for (int i=0; i<colors.length; i++) {
@@ -171,7 +178,7 @@ public class MainActivity extends Activity {
             });
         }
         section("О ПРОГРАММЕ");
-        TextView note=label("HUNTARES TOOL • Android\nPAK/LUA-модули: поддержка зависит от формата. Алгоритм Lua: @VoidPAK.",14,muted);
+        TextView note=label("HUNTARES TOOL • Android\nPAK/LUA-модули: поддержка зависит от формата.",14,muted);
         note.setPadding(8,10,8,20); body.addView(note); footer();
     }
     void showLicenses() {
@@ -187,6 +194,7 @@ public class MainActivity extends Activity {
             Uri u = data.getData();
             getContentResolver().takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
             root = DocumentFile.fromTreeUri(this, u);
+            getPreferences(0).edit().putString("tree", u.toString()).apply();
             try { setup(); showHome(); msg("Созданы папки HUNTARES TOOL в выбранном каталоге"); }
             catch(Exception e) { msg("Ошибка: " + e.getMessage()); }
         }
