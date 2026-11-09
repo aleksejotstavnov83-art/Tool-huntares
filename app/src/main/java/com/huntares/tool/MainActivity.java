@@ -81,6 +81,7 @@ public class MainActivity extends Activity {
     }
     void showActivation(){
         init("Активация доступа");
+        TextView offlineInfo=label("ОФЛАЙН-ВЕРСИЯ • Интернет и сервер не требуются",12,muted); offlineInfo.setPadding(dp(6),dp(10),0,dp(5));body.addView(offlineInfo);
         TextView t=label("Введите лицензионный ключ, чтобы открыть HUNTARES TOOL",16,white);t.setPadding(dp(6),dp(22),0,dp(14));body.addView(t);
         EditText key=new EditText(this);key.setSingleLine(false);key.setMinLines(2);key.setMaxLines(5);key.setHint("Ключ доступа");key.setTextColor(white);key.setHintTextColor(muted);key.setBackground(panel(false));key.setPadding(dp(15),dp(12),dp(15),dp(12));body.addView(key);
         button("Активировать",()->activate(key.getText().toString().trim()));

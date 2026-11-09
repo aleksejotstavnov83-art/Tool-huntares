@@ -21,8 +21,13 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.10.2'
+      - name: Verify offline activation sources
+        run: |
+          if grep -Eq 'trycloudflare|Настроить адрес сервера' app/src/main/java/com/huntares/tool/MainActivity.java; then
+            echo 'ERROR: Old server activation found'; exit 1
+          fi
       - run: gradle --no-daemon assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: HUNTARES-TOOL-debug-APK
+          name: HUNTARES-TOOL-OFFLINE-APK
           path: app/build/outputs/apk/debug/app-debug.apk
