@@ -26,25 +26,46 @@ public class MainActivity extends Activity {
     String mode = "full";
     boolean admin = false;
     String sessionKey = "";
-    String api = "";
-    interface ApiResult { void done(JSONObject result, String error); }
-    void request(String route, JSONObject payload, ApiResult callback) {
-        new Thread(() -> {
-            try {
-                URL url = new URL(api + route);
-                HttpURLConnection c = (HttpURLConnection)url.openConnection();
-                c.setConnectTimeout(10000); c.setReadTimeout(10000);
-                c.setRequestMethod("POST"); c.setDoOutput(true);
-                c.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-                byte[] bytes=payload.toString().getBytes("UTF-8");
-                try(OutputStream o=c.getOutputStream()){o.write(bytes);}
-                InputStream in=(c.getResponseCode()<400)?c.getInputStream():c.getErrorStream();
-                ByteArrayOutputStream out=new ByteArrayOutputStream(); byte[] b=new byte[4096]; int n;
-                while((n=in.read(b))!=-1)out.write(b,0,n);
-                JSONObject r=new JSONObject(out.toString("UTF-8")); c.disconnect();
-                runOnUiThread(()->callback.done(r,null));
-            } catch(Exception e) {runOnUiThread(()->callback.done(null,e.getMessage()));}
-        }).start();
+    // OFFLINE DEMO: local admin authorization is not tamper-proof.
+    // The signing private key is still embedded and extractable; not for commercial security.
+    // SHA-256 verifier: the literal admin passphrase is not included in the APK.
+    // This only obscures the secret; local authorization can still be patched.
+    private static final String ACCESS_DIGEST = "52f4853d1f97d4c81dc04df1f430ed6f991b9bc75495c4d87c8a8dd897e83a4b";
+    private boolean checkLocalAccess(String supplied) {
+        try {
+            java.security.MessageDigest sha = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] digest = sha.digest(supplied.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            byte[] expected = new byte[ACCESS_DIGEST.length() / 2];
+            for (int i = 0; i < expected.length; i++)
+                expected[i] = (byte) Integer.parseInt(ACCESS_DIGEST.substring(i*2, i*2+2), 16);
+            return java.security.MessageDigest.isEqual(digest, expected);
+        } catch (Exception ignored) { return false; }
+    }
+    static final String SIGNING_PRIVATE = "MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQDP0OW7L9B3jp3zstSIckvejFA5AFsYqLtEdU4WLMcW0DDB9Ps9L+BuxtV7hFNOrKKBF5wd3rAxtwT8S5TMbX80aAm1bDAr3DgDohHhkHtIhkriEUciPPk2yjok1x7ewi5icWtUrv+OpRhEgLKBUdbMnBkvjisO8XtoYxNAA2dTqavjD5qoN4JwehQ2rXonoSrNluM3hjuPb60dIAdcrNu4YbNiLhRAc+hW5orKOXbrUqAkopD63P7C4kf4fzZy6piP+bfBGoZQgQxBBMXokKudvT/Xbw/Ub48frmZvBwsWISufWTguW/muqIiJEnQZhf2VsptbcU1Coq0X2then5mNAgMBAAECggEATbOVsf+Wup0ggdYDkWDq7TMZa7auWPH90wLpR3FGn0kIcfzfU2lrSQAfIie/3lK+D/Z78M8qoewEeTDpWeY3AalEuAjTmhKk/vbCKMyUy/EqXoyHRE34AHxscQneCPwhy70MnIUyGGuyPyq/k4q9/ZL/97/4aYXw1n7026JqJ+VETO647qrn8MbUo2GNoHgL1Fjxr49fod6e6KNsGs1bsSZtkQFuxjSD5K9QT23AhoRgo5FLGviXFqSC3hWbD5K9nRXxDSEpnS5IUUWBKVq+8z5PqS4oBkIjGjVtRQnJaZ35FH5L7ihgwFJ1XganCb7lnKoDX4lboz2/lpV7GQBLIQKBgQDsuwYVpHv3sJZosZ8pOnGPXoD6Q+Uqk3vXAMNocfvx8Pw+BWcEX0OOEbsDw6MuLoXhuzFJLz4oZPrvnH/AbwTbZhexufbePJt+NBFU3jDEdK938Fej304/UnfIvMpWZ1Ghl7jt/Sg9Y7jxzAg70u0lxS+OScKfKxSqzSN5YLejBwKBgQDgu1qc3JPwwpOhDKN+HwXbU0mqWKoEhJ7/EmRCqjyr8lVXXR9SqZM0JWB2vbojwFeo2WrGdJOzMDt+HA4+DBxtrrwunWPGLuS+yAWNeBJsPOP2IHLtX8DZKKRxdSa9rHoYFkJCikBeAltC/O9sAaqm4lFnvDdMFx9SZejqVSBVywKBgEmXNiQCNvtfrNIs7VJutaCg+y1Rb+sVX/kNZrGQRYcHqBJLsaOdTa3beyyHY7HWio4KmB6tDgCWq59TIi+bE4J0sUbxjXm2k4ve+chNLhHUSDvbvhLWN0feBhij/65ufeTi+n0ZJqo21uZry991CX2lV8w+x76dMNaL4Mw5sbx/AoGALtrhKZNTxP7MiOd5rvII5pGW6k1SJV8BR20uOjgELlV4NZ7UyQdSCa1BT4B/LrULkcjC2l2z7chAnyp6TbV4t+WWlqF6C/f6+Uv63GQMc0S+wrJBQ/yS2LQAlSc3zJQJYLxDVFw+z1rubCkQQhSW3/SPxHEZlmO7xBI7XaAh/cECgYBYU2yuAY0th0CVH81agJFtUxuxtZjOZx0NdioyXti82v8oNYye7cB3GgipUlL3rN+Mymxg9nZT089tL0B7xev3iushpXH7tn8447FDLsxfvjj0IjjTAE3Wm/uXtfo9ukyqVnRKH8K+OXWE2uE9BMyXIv2SgP2dZ2+JGb57HPvnng==";
+    static final String SIGNING_PUBLIC = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAz9Dluy/Qd46d87LUiHJL3oxQOQBbGKi7RHVOFizHFtAwwfT7PS/gbsbVe4RTTqyigRecHd6wMbcE/EuUzG1/NGgJtWwwK9w4A6IR4ZB7SIZK4hFHIjz5Nso6JNce3sIuYnFrVK7/jqUYRICygVHWzJwZL44rDvF7aGMTQANnU6mr4w+aqDeCcHoUNq16J6EqzZbjN4Y7j2+tHSAHXKzbuGGzYi4UQHPoVuaKyjl261KgJKKQ+tz+wuJH+H82cuqYj/m3wRqGUIEMQQTF6JCrnb0/128P1G+PH65mbwcLFiErn1k4Llv5rqiIiRJ0GYX9lbKbW3FNQqKtF9rYXp+ZjQIDAQAB";
+    final String STORE = "offline_licenses";
+    String b64(byte[] b) { return android.util.Base64.encodeToString(b, android.util.Base64.URL_SAFE | android.util.Base64.NO_WRAP | android.util.Base64.NO_PADDING); }
+    byte[] un64(String s) { return android.util.Base64.decode(s, android.util.Base64.URL_SAFE | android.util.Base64.NO_WRAP | android.util.Base64.NO_PADDING); }
+    String sign(String payload) throws Exception {
+        java.security.KeyFactory factory=java.security.KeyFactory.getInstance("RSA");
+        java.security.PrivateKey pk=factory.generatePrivate(new java.security.spec.PKCS8EncodedKeySpec(android.util.Base64.decode(SIGNING_PRIVATE,android.util.Base64.DEFAULT)));
+        java.security.Signature sig=java.security.Signature.getInstance("SHA256withRSA");sig.initSign(pk);sig.update(payload.getBytes("UTF-8"));return b64(sig.sign());
+    }
+    JSONObject decodeLicense(String token) throws Exception {
+        String[] parts=token.split("\\.");
+        if(parts.length!=3 || !parts[0].equals("HT1"))throw new Exception("Неверный формат ключа");
+        java.security.KeyFactory factory=java.security.KeyFactory.getInstance("RSA");
+        java.security.PublicKey pk=factory.generatePublic(new java.security.spec.X509EncodedKeySpec(android.util.Base64.decode(SIGNING_PUBLIC,android.util.Base64.DEFAULT)));
+        java.security.Signature sig=java.security.Signature.getInstance("SHA256withRSA");sig.initVerify(pk);sig.update(parts[1].getBytes("UTF-8"));
+        if(!sig.verify(un64(parts[2])))throw new Exception("Неверная подпись ключа");
+        JSONObject data=new JSONObject(new String(un64(parts[1]),"UTF-8"));
+        if(data.optLong("exp",0)>0 && System.currentTimeMillis()>data.optLong("exp"))throw new Exception("Срок ключа истёк");
+        if(data.optString("type").equals("hwid") && !deviceId().equals(data.optString("device")))throw new Exception("Ключ привязан к другому устройству");
+        return data;
+    }
+    void copyText(String text) {
+        ((android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE)).setPrimaryClip(android.content.ClipData.newPlainText("HUNTARES key",text));
+        msg("Скопировано в буфер обмена");
     }
     JSONObject obj(String... fields) { JSONObject j=new JSONObject(); try {for(int i=0;i<fields.length;i+=2)j.put(fields[i],fields[i+1]);}catch(Exception e){}return j; }
     String deviceId() {
@@ -54,29 +75,21 @@ public class MainActivity extends Activity {
         return id;
     }
     void activate(String key) {
-        if(api.isEmpty()){msg("Сначала укажите HTTPS-адрес сервера в настройках подключения");return;}
-        msg("Проверяем ключ...");
-        request("/activate",obj("key",key,"device_id",deviceId(),"model",android.os.Build.MANUFACTURER+" "+android.os.Build.MODEL),(r,e)->{
-            if(e!=null){msg("Нет связи с сервером: "+e);return;}
-            if(!r.optBoolean("ok")){msg(r.optString("error","Ключ не принят"));return;}
-            sessionKey=key;admin=r.optBoolean("admin");showHome();
-        });
+        if(checkLocalAccess(key)){admin=true;sessionKey=key;showHome();return;}
+        try {decodeLicense(key);admin=false;sessionKey=key;showHome();}
+        catch(Exception e){msg("Активация отклонена: "+e.getMessage());}
     }
     void showActivation(){
         init("Активация доступа");
         TextView t=label("Введите лицензионный ключ, чтобы открыть HUNTARES TOOL",16,white);t.setPadding(dp(6),dp(22),0,dp(14));body.addView(t);
-        EditText key=new EditText(this);key.setSingleLine(true);key.setHint("Ключ доступа");key.setTextColor(white);key.setHintTextColor(muted);key.setBackground(panel(false));key.setPadding(dp(15),dp(12),dp(15),dp(12));body.addView(key);
+        EditText key=new EditText(this);key.setSingleLine(false);key.setMinLines(2);key.setMaxLines(5);key.setHint("Ключ доступа");key.setTextColor(white);key.setHintTextColor(muted);key.setBackground(panel(false));key.setPadding(dp(15),dp(12),dp(15),dp(12));body.addView(key);
         button("Активировать",()->activate(key.getText().toString().trim()));
+        TextView code=label("Код устройства: "+deviceId(),12,muted);code.setPadding(dp(8),dp(18),dp(8),dp(10));body.addView(code);
+        button("Скопировать код устройства",()->copyText(deviceId()));
         TextView contact=label("Получить ключ и купить обучение по созданию CFG: @haunter_extaze",14,white);
         contact.setPadding(dp(8),dp(22),dp(8),dp(22));body.addView(contact);
         contact.setOnClickListener(v->startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse("https://t.me/haunter_extaze"))));
-        button("Настроить адрес сервера",()->showConnection());
         footer();
-    }
-    void showConnection(){
-        init("Подключение");status.setText("Требуется ваш сервер лицензирования с HTTPS");
-        EditText field=new EditText(this);field.setSingleLine(true);field.setText(api);field.setHint("https://license.example.com");field.setTextColor(white);field.setHintTextColor(muted);body.addView(field);
-        button("Сохранить адрес",()->{String value=field.getText().toString().trim().replaceAll("/+$","");if(!value.startsWith("https://")){msg("Нужен HTTPS-адрес");return;}api=value;getPreferences(0).edit().putString("api",api).apply();showActivation();});
     }
 
     static final int PICK_TREE = 10;
@@ -85,7 +98,6 @@ public class MainActivity extends Activity {
         if (!Python.isStarted()) Python.start(new AndroidPlatform(this));
         String uri = getPreferences(0).getString("tree", null);
         if (uri != null) root = DocumentFile.fromTreeUri(this, Uri.parse(uri));
-        api=getPreferences(0).getString("api", "");
         showActivation();
     }
     int white = Color.WHITE;
@@ -249,7 +261,7 @@ public class MainActivity extends Activity {
     }
     void showAdmin() {
         if(!admin){showHome();return;}
-        init("Админ-панель");status.setText("Управление ключами на сервере");
+        init("Админ-панель");status.setText("Офлайн-ключи • без сервера");
         button("Создать HWID-ключ",()->showCreateKey("hwid"));
         button("Создать универсальный ключ",()->showCreateKey("universal"));
         button("Информация о ключах",()->showKeys());footer();
@@ -259,51 +271,62 @@ public class MainActivity extends Activity {
         init(type.equals("hwid")?"Создать HWID-ключ":"Создать универсальный ключ");
         section("НАЗВАНИЕ КЛЮЧА");
         EditText name=new EditText(this);name.setSingleLine(true);name.setHint("HUNTARES-VIP");name.setTextColor(white);name.setHintTextColor(muted);body.addView(name);
-        Switch unlimited=new Switch(this);unlimited.setText("Бессрочно (до отключения)");unlimited.setTextColor(white);unlimited.setChecked(true);body.addView(unlimited);
+        EditText device=new EditText(this);
+        if(type.equals("hwid")){
+            section("КОД УСТРОЙСТВА ПОЛЬЗОВАТЕЛЯ");
+            device.setSingleLine(true);device.setHint("Пользователь копирует код на экране входа");device.setTextColor(white);device.setHintTextColor(muted);body.addView(device);
+        }
+        Switch unlimited=new Switch(this);unlimited.setText("Бессрочно");unlimited.setTextColor(white);unlimited.setChecked(true);body.addView(unlimited);
         section("СРОК В ДНЯХ");
         EditText days=new EditText(this);days.setInputType(2);days.setText("7");days.setTextColor(white);days.setVisibility(View.GONE);body.addView(days);
         unlimited.setOnCheckedChangeListener((v,on)->days.setVisibility(on?View.GONE:View.VISIBLE));
-        button("Создать ключ",()->{
-            String title=name.getText().toString().trim();
-            if(title.isEmpty()){msg("Введите название ключа");return;}
-            String d=unlimited.isChecked()?"0":days.getText().toString().trim();
-            request("/admin/create",obj("admin_key",sessionKey,"name",title,"type",type,"days",d),(r,e)->{
-                msg(e!=null?e:r.optBoolean("ok")?"Ключ создан: "+r.optString("key"):r.optString("error"));
-            });
+        button("Создать и скопировать ключ",()->{
+            try {
+                String title=name.getText().toString().trim();if(title.isEmpty())throw new Exception("Введите название");
+                String id=device.getText().toString().trim();if(type.equals("hwid") && !id.matches("[a-fA-F0-9]{32}"))throw new Exception("Нужен 32-значный код устройства");
+                long exp=0;
+                if(!unlimited.isChecked()){
+                    long d=Long.parseLong(days.getText().toString().trim());
+                    if(d<1 || d>36500)throw new Exception("Срок: 1–36500 дней");
+                    exp=System.currentTimeMillis()+d*86400000L;
+                }
+                JSONObject data=new JSONObject();data.put("name",title);data.put("type",type);data.put("device",id);data.put("exp",exp);data.put("created",System.currentTimeMillis());
+                String encoded=b64(data.toString().getBytes("UTF-8"));
+                String token="HT1."+encoded+"."+sign(encoded);
+                org.json.JSONArray all=storedKeys();all.put(new JSONObject().put("token",token).put("name",title).put("type",type).put("device",id).put("exp",exp));
+                getPreferences(0).edit().putString(STORE,all.toString()).apply();
+                copyText(token);
+                new AlertDialog.Builder(this).setTitle("Ключ создан").setMessage("Ключ скопирован. Передайте его пользователю.\n\n"+title+"\n"+token).setPositiveButton("Готово",null).show();
+            }catch(Exception e){msg("Ошибка: "+e.getMessage());}
         });footer();
     }
+    JSONArray storedKeys(){try{return new JSONArray(getPreferences(0).getString(STORE,"[]"));}catch(Exception e){return new JSONArray();}}
     void showKeys(){
         if(!admin){showActivation();return;}
-        init("Информация о ключах");msg("Загрузка...");
-        request("/admin/list",obj("admin_key",sessionKey),(r,e)->{
-            if(e!=null){msg(e);return;}
-            if(!r.optBoolean("ok")){msg(r.optString("error"));return;}
-            msg("Нажмите на ключ для просмотра устройств");
-            JSONArray items=r.optJSONArray("keys");if(items==null)return;
-            for(int i=0;i<items.length();i++){
-                JSONObject item=items.optJSONObject(i);if(item==null)continue;
-                String k=item.optString("key");
-                button(k+"  •  "+item.optString("type")+(item.optBoolean("active")?"  ✓":"  ✕"),()->showKeyDetails(k));
-            }
-        });
+        init("Информация о ключах");
+        msg("Список хранится только на этом телефоне. Удалённые активации недоступны.");
+        JSONArray all=storedKeys();
+        for(int i=0;i<all.length();i++){
+            JSONObject item=all.optJSONObject(i);if(item==null)continue;
+            String token=item.optString("token");
+            button(item.optString("name")+" • "+item.optString("type"),()->showKeyDetails(token));
+        }
+        if(all.length()==0)section("КЛЮЧЕЙ ПОКА НЕТ");
+        footer();
     }
-    void showKeyDetails(String key){
-        init("Данные ключа");msg(key);
-        request("/admin/details",obj("admin_key",sessionKey,"key",key),(r,e)->{
-            if(e!=null){msg(e);return;}
-            if(!r.optBoolean("ok")){msg(r.optString("error"));return;}
-            JSONArray devices=r.optJSONArray("devices");
-            section("УСТРОЙСТВА И АКТИВАЦИИ");
-            if(devices==null||devices.length()==0)button("Активаций пока нет",()->{});
-            else for(int i=0;i<devices.length();i++){
-                JSONObject device=devices.optJSONObject(i);if(device==null)continue;
-                TextView row=label(device.optString("model")+"\nID установки: "+device.optString("device_id")+"\nПоследний вход: "+device.optString("last_seen"),13,white);
-                row.setPadding(dp(12),dp(12),dp(12),dp(12));row.setBackground(panel(false));body.addView(row);
-            }
-            button("Отключить ключ",()->new AlertDialog.Builder(this).setTitle("Отключить ключ?")
-                .setPositiveButton("Отключить",(d,w)->request("/admin/revoke",obj("admin_key",sessionKey,"key",key),(res,err)->{if(err!=null)msg(err);else showKeys();}))
-                .setNegativeButton("Отмена",null).show());
-        });
+    void showKeyDetails(String token){
+        if(!admin){showActivation();return;}
+        init("Данные ключа");
+        try {
+            JSONObject data=decodeLicense(token);
+            section("НАЗВАНИЕ: "+data.optString("name"));
+            section("ТИП: "+data.optString("type"));
+            section("УСТРОЙСТВО (ЕСЛИ HWID): "+data.optString("device"));
+            long exp=data.optLong("exp");section("СРОК: "+(exp==0?"Бессрочно":new java.text.SimpleDateFormat("dd.MM.yyyy",java.util.Locale.getDefault()).format(new Date(exp))));
+        }catch(Exception e){section("Состояние: "+e.getMessage());}
+        button("Скопировать ключ",()->copyText(token));
+        section("Без сервера нельзя узнать модель телефона пользователя или отозвать уже выданный ключ.");
+        footer();
     }
     @Override protected void onActivityResult(int req, int result, Intent data) {
         super.onActivityResult(req, result, data);
